@@ -1,0 +1,287 @@
+blueprint:
+  name: Auto fan speed based on Temperature and Humidity
+  description: "Auto fan control based on both temperature and humidity.\n\n The fan speed will be set according to the higher of the two calculated speeds: one based on ambient temperature and the other based on humidity. \nA time delay and a minimum percentage change is used to eliminate frequent speed changes.\n At the minimum settings for either, the fan will turn off."
+  domain: automation
+  input:
+    temp_sensor:
+      name: 🌡 Temperature Sensor
+      description: Enter your temperature sensor.
+      default: []
+      selector:
+        entity:
+          domain:
+          - sensor
+          device_class:
+          - temperature
+          multiple: false
+    humidity_sensor:
+      name: 💧 Humidity Sensor
+      description: Enter your humidity sensor.
+      default: []
+      selector:
+        entity:
+          domain:
+          - sensor
+          device_class:
+          - humidity
+          multiple: false
+    fan_switch:
+      name: 💨 Fan
+      description: The fan you wish to speed control.
+      selector:
+        entity:
+          domain:
+          - fan
+          multiple: false
+    min_fan_speed:
+      name: 💨 Minimum Fan Speed
+      description: Set the minimum percentage speed when your fan is still on.
+      default: 16
+      selector:
+        number:
+          min: 1.0
+          max: 100.0
+          mode: slider
+          step: 1.0
+          unit_of_measurement: '%'
+    max_fan_speed:
+      name: 💨 Maximum Fan Speed
+      description: Set the maximum percentage speed for your fan.
+      default: 100
+      selector:
+        number:
+          min: 1.0
+          max: 100.0
+          mode: slider
+          step: 1.0
+          unit_of_measurement: '%'
+    max_temp:
+      name: 📈 Maximum Temperature
+      description: The temperature at which the fan will run at max speed.
+      default: 40
+      selector:
+        number:
+          min: 10.0
+          max: 120.0
+          step: 1.0
+          mode: slider
+    min_temp:
+      name: 📉 Minimum Temperature
+      description: The temperature at which the fan will run at minimum speed.
+      default: 23
+      selector:
+        number:
+          min: 10.0
+          max: 120.0
+          step: 1.0
+          mode: slider
+    max_humidity:
+      name: 📈 Maximum Humidity
+      description: The humidity level at which the fan will run at max speed.
+      default: 80
+      selector:
+        number:
+          min: 10.0
+          max: 100.0
+          step: 1.0
+          mode: slider
+    min_humidity:
+      name: 📉 Minimum Humidity
+      description: The humidity level at which the fan will run at minimum speed.
+      default: 40
+      selector:
+        number:
+          min: 10.0
+          max: 100.0
+          step: 1.0
+          mode: slider
+    off_temp:
+      name: 🛑 The temperature at which the fan switches off
+      description: The temperature below which the fan turns off.
+      default: 22
+      selector:
+        number:
+          min: 10.0
+          max: 120.0
+          step: 1.0
+          mode: slider
+    off_humidity:
+      name: 🛑 The humidity level at which the fan switches off
+      description: The humidity level below which the fan turns off.
+      default: 35
+      selector:
+        number:
+          min: 10.0
+          max: 100.0
+          step: 1.0
+          mode: slider
+    auto_turn_on_enabled:
+      name: ✅ Enable auto fan on
+      description: Let the fan automatically turn back on if the temperature or humidity returns to a value above the off thresholds.
+      default: true
+      selector:
+        boolean: {}
+    change_time:
+      name: ⏱️ Change frequency delay
+      description: How long to delay between potential speed adjustments.
+      default: 30
+      selector:
+        number:
+          min: 1.0
+          max: 120.0
+          unit_of_measurement: minutes
+          step: 1.0
+          mode: slider
+    change_threshold:
+      name: Minimum percentage change
+      description: The minimum percentage change (between current fan speed and set fan speed).
+      default: 1
+      selector:
+        number:
+          min: 1.0
+          max: 100.0
+          mode: slider
+          step: 1.0
+          unit_of_measurement: '%'
+    max_change:
+      name: Maximum percentage change
+      description: The maximum percentage change (between current fan speed and set fan speed).
+      default: 50
+      selector:
+        number:
+          min: 1.0
+          max: 100.0
+          mode: slider
+          step: 1.0
+          unit_of_measurement: '%'
+    blocker_entity:
+      name: (OPTIONAL) Blocking entity
+      description: If this entity's state is on, it will prevent the automation from running. E.g., sleep mode or away mode.
+      default: []
+      selector:
+        entity:
+          multiple: false
+
+  source_url: https://community.home-assistant.io/t/adaptive-fan-speed-control-based-on-temperature-and-speed-range/678152
+variables:
+  temp_sensor: !input temp_sensor
+  humidity_sensor: !input humidity_sensor
+  fan_switch: !input fan_switch
+  auto_turn_on_enabled: !input 'auto_turn_on_enabled'
+
+  min_fan_speed: !input min_fan_speed
+  max_fan_speed: !input max_fan_speed
+
+  max_temp: !input max_temp
+  min_temp: !input min_temp
+  off_temp: !input off_temp
+
+  max_humidity: !input max_humidity
+  min_humidity: !input min_humidity
+  off_humidity: !input off_humidity
+
+  change_time: !input change_time
+  max_change: !input max_change
+  change_threshold: !input change_threshold
+  blocker_entity: !input blocker_entity
+  current_temp: "{{ states(temp_sensor) | float(0)}}"
+  current_humidity: "{{ states(humidity_sensor) | float(0)}}"
+  fan_speed: '{{ state_attr(fan_switch,''percentage'') | float(0)}}'
+
+  # Temperature-based fan speed calculation
+  temp_range: '{{ max_temp | float(0) - min_temp | float(0) }}'
+  temp_slope: '{{ (max_fan_speed | float(0) - min_fan_speed | float(0)) / temp_range }}'
+  temp_fan_speed: '{{ [[temp_slope * (current_temp - min_temp) + min_fan_speed, min_fan_speed] | max, max_fan_speed] | min }}'
+
+  # Humidity-based fan speed calculation
+  humidity_range: '{{ max_humidity | float(0) - min_humidity | float(0) }}'
+  humidity_slope: '{{ (max_fan_speed | float(0) - min_fan_speed | float(0)) / humidity_range }}'
+  humidity_fan_speed: '{{ [[humidity_slope * (current_humidity - min_humidity) + min_fan_speed, min_fan_speed] | max, max_fan_speed] | min }}'
+
+  # Select the higher fan speed between temperature and humidity
+  set_fan_speed: '{{ [temp_fan_speed, humidity_fan_speed] | max }}'
+
+  speed_diff: '{{ (fan_speed - set_fan_speed) | abs }}'
+
+trigger:
+- platform: state
+  entity_id:
+  - !input fan_switch
+  id: fanon
+  from: 'off'
+  to: 'on'
+- platform: state
+  id: temp_state_change
+  entity_id:
+  - !input temp_sensor
+- platform: state
+  id: humidity_state_change
+  entity_id:
+  - !input humidity_sensor
+condition:
+- condition: template
+  alias: Check for blocker entity
+  value_template: '{{ (blocker_entity == none) or (states(blocker_entity) == ''off'')}}'
+action:
+- choose:
+  - conditions:
+    - condition: trigger
+      alias: Only run if fan was switched on
+      id: fanon
+    - condition: template
+      alias: Is the percentage change great enough?
+      value_template: '{{ speed_diff | float(0) > change_threshold | float(0) }}'
+    sequence:
+    - service: homeassistant.turn_on
+      data:
+        percentage: '{{ set_fan_speed }}'
+      target:
+        entity_id: '{{ fan_switch }}'
+    - delay:
+        minutes: !input change_time
+  - conditions:
+    - condition: template
+      value_template: '{{ states(fan_switch) == ''on'' }}'
+      alias: Make sure the fan is already on (ignore if it's been switched off)
+    - condition: template
+      alias: Is the percentage change great enough?
+      value_template: '{{ speed_diff | float(0) > change_threshold | float(0) }}'
+    - condition: template
+      alias: Is the temperature or humidity above the off thresholds?
+      value_template: >
+        {{ current_temp > off_temp or current_humidity > off_humidity }}
+    sequence:
+    - service: homeassistant.turn_on
+      target:
+        entity_id: '{{ fan_switch }}'
+      data:
+        percentage: '{{ set_fan_speed }}'
+    - delay:
+        minutes: !input change_time
+  - conditions:
+    - condition: not
+      alias: Make sure the fan hasn't just been turned on
+      conditions:
+      - condition: trigger
+        id: fanon
+    - condition: template
+      alias: Should the fan turn off based on both temperature and humidity?
+      value_template: '{{ current_temp <= off_temp and current_humidity <= off_humidity }}'
+    sequence:
+    - service: homeassistant.turn_off
+      target:
+        entity_id: '{{ fan_switch }}'
+  - conditions:
+    - '{{ auto_turn_on_enabled }}'
+    - condition: template
+      value_template: '{{ states(fan_switch) == ''off'' }}'
+      alias: Is the fan currently off?
+    - condition: template
+      alias: Is either the temperature or humidity above the off thresholds?
+      value_template: '{{ current_temp > off_temp or current_humidity > off_humidity }}'
+    sequence:
+    - service: homeassistant.turn_on
+      data:
+        percentage: '{{ set_fan_speed }}'
+      target:
+        entity_id: '{{ fan_switch }}'
