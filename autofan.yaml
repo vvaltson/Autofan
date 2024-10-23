@@ -199,8 +199,8 @@ variables:
   humidity_fan_speed: '{{ [[humidity_slope * (current_humidity - min_humidity) + min_fan_speed, min_fan_speed] | max, max_fan_speed] | min }}'
 
   # Select the higher fan speed between temperature and humidity
-  #set_fan_speed: '{{ [temp_fan_speed, humidity_fan_speed] | max }}'
-  set_fan_speed: '{{ [temp_fan_speed | default(0), humidity_fan_speed | default(0)] | max }}'
+  set_fan_speed: '{{ [temp_fan_speed, humidity_fan_speed] | max }}'
+  #set_fan_speed: '{{ [temp_fan_speed | default(0), humidity_fan_speed | default(0)] | max }}'
 
   speed_diff: '{{ (fan_speed - set_fan_speed) | abs }}'
 
