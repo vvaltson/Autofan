@@ -250,3 +250,5 @@ action:
           minutes: !input change_time
 
 mode: single
+trace:
+  stored_traces: 50
