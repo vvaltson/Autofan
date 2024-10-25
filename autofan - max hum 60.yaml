@@ -1,6 +1,6 @@
 blueprint:
-  name: Auto Fan Speed - Humidity Control Below Target
-  description: "Adjusts exhaust fan speed in a growing tent to keep humidity below a target, accounting for garage humidity conditions."
+  name: Auto Fan Speed - Humidity Control with Range
+  description: "Adjusts exhaust fan speed in a growing tent to keep humidity within a target range, accounting for garage humidity conditions."
   domain: automation
   input:
     humidity_sensor:
@@ -31,9 +31,19 @@ blueprint:
           domain:
           - fan
           multiple: false
+    min_tent_humidity:
+      name: 📉 Min Tent Humidity Level
+      description: Minimum desired humidity level in the growing tent.
+      default: 55
+      selector:
+        number:
+          min: 10.0
+          max: 100.0
+          step: 1.0
+          mode: slider
     max_tent_humidity:
-      name: 🎯 Max Tent Humidity Level
-      description: Maximum desired humidity level in the growing tent (e.g., 60%).
+      name: 📈 Max Tent Humidity Level
+      description: Maximum desired humidity level in the growing tent.
       default: 60
       selector:
         number:
@@ -124,6 +134,7 @@ variables:
   humidity_sensor: !input humidity_sensor
   garage_humidity_sensor: !input garage_humidity_sensor
   fan_switch: !input fan_switch
+  min_tent_humidity: !input min_tent_humidity
   max_tent_humidity: !input max_tent_humidity
   min_fan_speed: !input min_fan_speed
   max_fan_speed: !input max_fan_speed
@@ -137,21 +148,22 @@ variables:
   current_garage_humidity: "{{ states(garage_humidity_sensor) | float(0) }}"
   fan_speed: "{{ state_attr(fan_switch, 'percentage') | float(0) }}"
 
-  # Check if tent humidity exceeds the maximum target
+  # Determine fan action based on humidity range
   tent_humidity_high: "{{ current_humidity > max_tent_humidity }}"
-
-  # Check if garage humidity is below the target tent humidity
+  tent_humidity_low: "{{ current_humidity < min_tent_humidity }}"
   garage_humidity_ok: "{{ current_garage_humidity < max_tent_humidity }}"
 
-  # Fan speed adjustment based on tent humidity when garage humidity allows
+  # Adjust fan speed up if tent humidity is above max_tent_humidity and garage conditions are ok
   initial_set_fan_speed: >
     {% if tent_humidity_high and garage_humidity_ok %}
       {{ [
           min_fan_speed + ((current_humidity - max_tent_humidity) / (100 - max_tent_humidity)) * (max_fan_speed - min_fan_speed), 
           min_fan_speed
         ] | max | min(max_fan_speed) }}
+    {% elif tent_humidity_low %}
+      {{ min_fan_speed }}  # Set to min speed or turn off if humidity is too low
     {% else %}
-      {{ fan_speed }}  # Keep current fan speed if conditions aren't met
+      {{ fan_speed }}  # Maintain current fan speed if within range
     {% endif %}
   
   adjusted_set_fan_speed: >
@@ -188,10 +200,10 @@ condition:
     alias: Check for blocker entity
     value_template: "{{ (blocker_entity == none) or (states(blocker_entity) == 'off') }}"
 
-  # Only adjust if tent humidity exceeds target and garage conditions allow
+  # Adjust only if tent humidity is outside desired range and garage conditions allow
   - condition: template
-    alias: Tent humidity must exceed target
-    value_template: "{{ tent_humidity_high }}"
+    alias: Tent humidity must exceed max or be below min for adjustment
+    value_template: "{{ tent_humidity_high or tent_humidity_low }}"
 
   - condition: template
     alias: Adjust only if garage humidity is below target tent humidity
