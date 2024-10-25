@@ -1,0 +1,267 @@
+blueprint:
+  name: Auto Fan Speed - Humidity Control Below Target
+  description: "Adjusts exhaust fan speed in a growing tent to keep humidity below a target, accounting for garage humidity conditions."
+  domain: automation
+  input:
+    humidity_sensor:
+      name: 🌱 Tent Humidity Sensor
+      description: The humidity sensor inside the growing tent.
+      selector:
+        entity:
+          domain:
+          - sensor
+          device_class:
+          - humidity
+          multiple: false
+    garage_humidity_sensor:
+      name: 🏠 Garage Humidity Sensor
+      description: The humidity sensor for the garage to prevent unnecessary adjustments.
+      selector:
+        entity:
+          domain:
+          - sensor
+          device_class:
+          - humidity
+          multiple: false
+    fan_switch:
+      name: 💨 Fan
+      description: The fan to speed control.
+      selector:
+        entity:
+          domain:
+          - fan
+          multiple: false
+    max_tent_humidity:
+      name: 🎯 Max Tent Humidity Level
+      description: Maximum desired humidity level in the growing tent (e.g., 60%).
+      default: 60
+      selector:
+        number:
+          min: 10.0
+          max: 100.0
+          step: 1.0
+          mode: slider
+    min_fan_speed:
+      name: 💨 Minimum Fan Speed
+      description: Minimum fan speed.
+      default: 1
+      selector:
+        number:
+          min: 1.0
+          max: 100.0
+          mode: slider
+          step: 1.0
+          unit_of_measurement: '%'
+    max_fan_speed:
+      name: 💨 Maximum Fan Speed
+      description: Maximum fan speed.
+      default: 100
+      selector:
+        number:
+          min: 1.0
+          max: 100.0
+          mode: slider
+          step: 1.0
+          unit_of_measurement: '%'
+    off_humidity:
+      name: 🛑 Off Humidity Level
+      description: Tent humidity level below which the fan turns off.
+      default: 35
+      selector:
+        number:
+          min: 10.0
+          max: 100.0
+          step: 1.0
+          mode: slider
+    auto_turn_on_enabled:
+      name: ✅ Enable auto fan on
+      description: Automatically turn the fan back on if tent humidity rises above the off level.
+      default: true
+      selector:
+        boolean: {}
+    change_time:
+      name: ⏱️ Change Frequency Delay
+      description: Delay time between speed adjustments.
+      default: 1
+      selector:
+        number:
+          min: 1.0
+          max: 120.0
+          unit_of_measurement: minutes
+          step: 1.0
+          mode: slider
+    change_threshold:
+      name: Minimum Percentage Change
+      description: Minimum change (between current fan speed and set fan speed).
+      default: 1
+      selector:
+        number:
+          min: 1.0
+          max: 100.0
+          mode: slider
+          step: 1.0
+          unit_of_measurement: '%'
+    max_change:
+      name: Maximum Percentage Change
+      description: Maximum change (between current fan speed and set fan speed).
+      default: 50
+      selector:
+        number:
+          min: 1.0
+          max: 100.0
+          mode: slider
+          step: 1.0
+          unit_of_measurement: '%'
+    blocker_entity:
+      name: (OPTIONAL) Blocking entity
+      description: Prevents the automation from running if this entity's state is on.
+      default:
+      selector:
+        entity:
+          multiple: false
+
+variables:
+  humidity_sensor: !input humidity_sensor
+  garage_humidity_sensor: !input garage_humidity_sensor
+  fan_switch: !input fan_switch
+  max_tent_humidity: !input max_tent_humidity
+  min_fan_speed: !input min_fan_speed
+  max_fan_speed: !input max_fan_speed
+  off_humidity: !input off_humidity
+  change_time: !input change_time
+  max_change: !input max_change
+  change_threshold: !input change_threshold
+  blocker_entity: !input blocker_entity
+
+  current_humidity: "{{ states(humidity_sensor) | float(0) }}"
+  current_garage_humidity: "{{ states(garage_humidity_sensor) | float(0) }}"
+  fan_speed: "{{ state_attr(fan_switch, 'percentage') | float(0) }}"
+
+  # Check if tent humidity exceeds the maximum target
+  tent_humidity_high: "{{ current_humidity > max_tent_humidity }}"
+
+  # Check if garage humidity is below the target tent humidity
+  garage_humidity_ok: "{{ current_garage_humidity < max_tent_humidity }}"
+
+  # Fan speed adjustment based on tent humidity when garage humidity allows
+  initial_set_fan_speed: >
+    {% if tent_humidity_high and garage_humidity_ok %}
+      {{ [
+          min_fan_speed + ((current_humidity - max_tent_humidity) / (100 - max_tent_humidity)) * (max_fan_speed - min_fan_speed), 
+          min_fan_speed
+        ] | max | min(max_fan_speed) }}
+    {% else %}
+      {{ fan_speed }}  # Keep current fan speed if conditions aren't met
+    {% endif %}
+  
+  adjusted_set_fan_speed: >
+    {% set diff = initial_set_fan_speed - fan_speed %}
+    {% if diff > max_change | float(0) %}
+      {{ fan_speed + max_change | float(0) }}
+    {% elif diff < -max_change | float(0) %}
+      {{ fan_speed - max_change | float(0) }}
+    {% else %}
+      {{ initial_set_fan_speed }}
+    {% endif %}
+  
+  set_fan_speed: "{{ adjusted_set_fan_speed }}"
+  speed_diff: "{{ (fan_speed - set_fan_speed) | abs }}"
+
+trigger:
+  - platform: state
+    entity_id:
+    - !input fan_switch
+    id: fanon
+    from: 'off'
+    to: 'on'
+  - platform: state
+    id: tent_humidity_change
+    entity_id:
+    - !input humidity_sensor
+  - platform: state
+    id: garage_humidity_change
+    entity_id:
+    - !input garage_humidity_sensor
+
+condition:
+  - condition: template
+    alias: Check for blocker entity
+    value_template: "{{ (blocker_entity == none) or (states(blocker_entity) == 'off') }}"
+
+  # Only adjust if tent humidity exceeds target and garage conditions allow
+  - condition: template
+    alias: Tent humidity must exceed target
+    value_template: "{{ tent_humidity_high }}"
+
+  - condition: template
+    alias: Adjust only if garage humidity is below target tent humidity
+    value_template: "{{ garage_humidity_ok }}"
+
+action:
+  - choose:
+    - conditions:
+      - condition: trigger
+        alias: Only run if fan was switched on
+        id: fanon
+      - condition: template
+        alias: Is the percentage change great enough?
+        value_template: "{{ speed_diff | float(0) > change_threshold | float(0) }}"
+      sequence:
+      - service: homeassistant.turn_on
+        data:
+          percentage: "{{ set_fan_speed }}"
+        target:
+          entity_id: "{{ fan_switch }}"
+      - delay:
+          minutes: !input change_time
+    - conditions:
+      - condition: template
+        value_template: "{{ states(fan_switch) == 'on' }}"
+        alias: Ensure fan is on before adjusting
+      - condition: template
+        alias: Is the percentage change great enough?
+        value_template: "{{ speed_diff | float(0) > change_threshold | float(0) }}"
+      - condition: template
+        alias: Is the tent humidity above the off humidity?
+        value_template: "{{ current_humidity > off_humidity }}"
+      sequence:
+      - service: homeassistant.turn_on
+        target:
+          entity_id: "{{ fan_switch }}"
+        data:
+          percentage: "{{ set_fan_speed }}"
+      - delay:
+          minutes: !input change_time
+    - conditions:
+      - condition: not
+        alias: Prevent turning fan back on if humidity is below off level
+        conditions:
+        - condition: trigger
+          id: fanon
+      - condition: numeric_state
+        entity_id: !input humidity_sensor
+        below: !input off_humidity
+      sequence:
+      - service: homeassistant.turn_off
+        target:
+          entity_id: "{{ fan_switch }}"
+    - conditions:
+      - "{{ auto_turn_on_enabled }}"
+      - condition: template
+        value_template: "{{ states(fan_switch) == 'off' }}"
+        alias: Fan is off
+      - condition: template
+        alias: Tent humidity above the off threshold
+        value_template: "{{ current_humidity > off_humidity }}"
+      sequence:
+      - service: homeassistant.turn_on
+        data:
+          percentage: "{{ set_fan_speed }}"
+        target:
+          entity_id: "{{ fan_switch }}"
+      - delay:
+          minutes: !input change_time
+
+mode: single
+trace:
+  stored_traces: 50
